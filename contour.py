@@ -26,15 +26,15 @@ import sys
 import os # for some minor file path ( I really want to avoid this one )
 
 AREAS=1; # set of disjoint areas for a specific color
-RGBCOLOR = np.uint8([[[100, 0, 200]]])  # rgb color to select
+RGBCOLOR = np.uint8([[[  0, 0, 200]]])  # bgr color to select (rgb order is backwards)
 OPACITY=200 # Default Opacity of our polygon (0-255), 200 is approx 78%
-THETA=180 # hsv, hue +/- angle THETA (Larger number accepts larger color range)
+THETA=15  # hsv, hue +/- angle THETA (Larger number accepts larger color range)
 DELTA=0.2 # idk fam, changed this value and it didn't really do anything
 SAVE_IMAGE=False # save our mask as a .png?
 
 PREVIEW_MASK=False # Preview our overlay on top of old image to see if it looks right
 if (PREVIEW_MASK):
-    PREVIEW_MASK_ON_IMAGE=False
+    PREVIEW_MASK_ON_IMAGE=True
     QUIT_UPON_PREVIEW=True
 
 
@@ -192,32 +192,9 @@ def transform_coordinates(coords, hsv, center, bounds, rotation):
     final_coords = coords * np_scale_factor # Scale Image
     final_coords = np.array([center[0], center[1]] + final_coords , dtype=np.longdouble)# Move 
     
-    #final_coords = coords * np_scale_factor
     return final_coords
     
 
-    #x, y = coord[0]-center[0], coord[1]-center[1]
-
-    ##FIXME: This is inefficient and imprecise
-    #mulCos = math.cos(math.atan(y/x)-math.radians(rotation))
-    #mulSin = math.sin(math.atan(y/x)-math.radians(rotation))
-    #print(rotation)
-    #print(coord)
-    #coord = [center[0]+math.sqrt(x**2+y**2)*mulCos,center[1]-400+math.sqrt(x**2+y**2)*mulSin];
-    #print(coord)
-
-    ## for rotation of the image TODO: This literally evaluates the same every time, inefficent
-    #image_center = (max_image_w/2, max_image_h/2)
-    #image_mulCos = math.cos(math.radians(rotation)+math.atan(image_center[1]/image_center[0]))
-    #image_mulSin = math.sin(math.radians(rotation)+math.atan(image_center[1]/image_center[0]))
-    #image_m_norm = math.sqrt(image_center[0]**2 + image_center[1]**2)
-    #max_image_w, max_image_h = (image_center[0]+image_m_norm*abs(image_mulCos), image_center[1]+image_m_norm*abs(image_mulSin))
-
-    ##print(coord[0])
-    ##print(coord[0]/max_image_w*max_w + w)
-    #coord = [(coord[0]/max_image_w*bounds[0])+(center[0]-bounds[0]/2)\
-    #       ,-(coord[1]/max_image_h*bounds[1])+(center[1]+bounds[1]/2)];
-    #return coord
 
 def writeKML(filename, coords, rgb):
     '''
@@ -307,30 +284,10 @@ def main():
     
     
     # Good way to set a color range https://stackoverflow.com/questions/36817133/identifying-the-range-of-a-color-in-hsv-using-opencv
-    #green = np.uint8([[[0, 255, 0]]]) # Here insert the BGR values which you want to convert to HSV
-    #hsvGreen = cv2.cvtColor(green, cv2.COLOR_BGR2HSV)
-    #print(hsvGreen)
-    #
-    #lowerLimit = hsvGreen[0][0][0] - 10, 100, 100
-    #upperLimit = hsvGreen[0][0][0] + 10, 255, 255
-    
     
     
     # Assumes a bright color for RGBCOLOR
     lowerbound, upperbound = findMaskBounds(RGBCOLOR, THETA);
-    
-    
-    # Define range of red color in HSV
-    #lowerbound = np.array([0,100,100])
-    #upperbound = np.array([10,255,255])
-    #lowerbound = np.array([0,20,20])
-    #upperbound = np.array([360,255,255])
-    #blue
-    #lower_red = np.array([100,  50,  50])
-    #upper_red = np.array([130, 255, 255])
-    #idk
-    #lower_red = np.array([105,  50,  50])
-    #upper_red = np.array([255, 255, 255])
     
     
     # Threshold the HSV image to get only red colors
@@ -372,8 +329,6 @@ def main():
     for i in range(AREAS):
         contour_image = cv2.fillPoly(contour_image, [contours[max_contour_indices[-i]].reshape((-1, 1, 2))], (255, 255, 255))
     
-    #contour_image = np.zeros_like(image)
-    #contour_image = cv2.fillPoly(contour_image, [contours[max_contour_indices[-2]].reshape((-1, 1, 2))], (255, 255, 255))
     if (PREVIEW_MASK):
         if (PREVIEW_MASK_ON_IMAGE):
             preview = image.copy();
@@ -398,21 +353,27 @@ def main():
         cv2.imwrite(output_kml.rsplit('.', 1)[0] + ".png",contour_image)
     
     # Combine Areas
+    close_points = []
     final_coords = None
     for i in max_contour_indices:
-        coord_numpy = np.array(contours[max_contour_indices[0]]).reshape(-1,2)
+        coord_numpy = np.array(contours[i]).reshape(-1,2)
         # For each contour/area we want the points to end where they started
+        close_points.append(coord_numpy[0])
         coord_numpy = np.append(coord_numpy, [coord_numpy[0]], axis=0)
-        if ( final_coords != None):
-            np.append(final_coords, coord_numpy)
+
+        if ( np.any(final_coords) ):
+            final_coords = np.append(final_coords, coord_numpy, axis=0)
         else:
             final_coords = coord_numpy
 
+    # Make sure each Area begins where it ends (repeats a point thrice now)
+    for point in close_points[::-1]:
+        final_coords = np.append(final_coords, [point], axis=0)
+
+    final_coords = np.append(final_coords, [final_coords[0]], axis=0)
 
     # change our final_coords to lat-long)
-    final_coords = transform_coordinates(coord_numpy, hsv, center, bounds, r)
-
-    #print("So now we return the final coords: ", final_coords);
+    final_coords = transform_coordinates(final_coords, hsv, center, bounds, r)
 
     # Create the KML coordinates
     writeKML(output_kml, final_coords, RGBCOLOR);
